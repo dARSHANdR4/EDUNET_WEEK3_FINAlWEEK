@@ -1,0 +1,36 @@
+name: AI Prediction Dashboard CI
+on:
+  pull_request:
+    paths:
+      - 'dashboard/**'
+      - '.github/workflows/dashboard-ci.yml'
+  push:
+    branches: [feature/ai-prediction-dashboard]
+    paths:
+      - 'dashboard/**'
+      - '.github/workflows/dashboard-ci.yml'
+jobs:
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/frontend/package-lock.json
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+  backend-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m py_compile dashboard/backend/app/main.py
+      - run: python -m pip install -r dashboard/backend/requirements.txt
+      - run: python -c "import sys; sys.path.insert(0, 'dashboard/backend'); from app.main import app; print(app.title)"

@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = Path(os.getenv("MODEL_DIR", ROOT / "models"))
 app = FastAPI(title="AI Prediction Studio API", version="0.1.0", description="Validated API gateway for crop, fertilizer, and diabetes ML predictions.")
 origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if x.strip()]

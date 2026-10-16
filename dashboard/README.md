@@ -10,7 +10,7 @@ A combined React + FastAPI workspace for the existing crop, fertilizer, and diab
 
 ## Current status
 
-The UI and API contract are scaffolded. The API returns a clear HTTP 503 until the corresponding trained artifact is installed. This is intentional: CI passing on the source projects does not itself mean inference artifacts are available. Do not describe the dashboard as production-ready until model pipelines are trained, saved, and end-to-end tested.
+The responsive UI and FastAPI routes are implemented. GitHub Actions has passed frontend build, model training, and all API tests. The production container is configured to train and package the three model pipelines during its Docker build, so the service does not depend on ignored `.joblib` files being committed to Git. Live deployment and browser-based production verification are still pending.
 
 ## API routes
 
@@ -46,11 +46,11 @@ Configure `VITE_API_BASE_URL` in the frontend env file if the API runs elsewhere
 
 ## Model integration checklist
 
-1. For crop and fertilizer, create reusable training scripts from the source EDUNET notebook that preserve its exact feature order, encoders, and target labels. Save each *complete fitted preprocessing + model pipeline* as `crop.joblib` and `fertilizer.joblib`.
-2. For diabetes, use the same eight Pima dataset features and fit the `StandardScaler` only on training data, then save a single sklearn `Pipeline(StandardScaler, SVC(kernel="linear"))` as `diabetes.joblib`. Do not fit a scaler on the full dataset before splitting.
-3. Put the trained artifacts in `dashboard/backend/models/` locally or configure `MODEL_DIR` on the backend host. Keep datasets and sensitive artifacts out of Git unless their licensing and privacy status is confirmed.
-4. Run API tests and browser-based end-to-end tests for all three modules, including validation failures and missing-artifact behavior.
-5. Deploy the frontend to Cloudflare Pages (root directory `dashboard/frontend`, build command `npm run build`, output `dist`) and deploy the API to Render using `dashboard/backend/Dockerfile`. Set `VITE_API_BASE_URL` at frontend build time and `CORS_ORIGINS` server-side.
+1. The CI pipeline trains and tests the crop, fertilizer, and diabetes inference pipelines using the source project CSVs plus a public Pima diabetes dataset.
+2. The Render Docker build uses the **repository root as Docker context** and `dashboard/backend/Dockerfile` as its Dockerfile. It trains and bundles `.joblib` files inside the image; model files and the downloaded diabetes dataset do not need to be committed.
+3. Deploy the frontend to Cloudflare Pages: connect this repository, set root directory to `dashboard/frontend`, build command `npm run build`, output directory `dist`, and set `VITE_API_BASE_URL` to the deployed Render API URL (no trailing slash).
+4. Deploy the API on Render as a Docker web service: Docker context/root directory `.` (repository root), Dockerfile path `dashboard/backend/Dockerfile`, health check path `/health`. After Cloudflare Pages gives the frontend URL, set Render environment variable `CORS_ORIGINS` to that exact origin (for example `https://your-project.pages.dev`, no trailing slash).
+5. After both deployments, test `/health`, `/docs`, and all three prediction routes from the live UI. CI success is not a substitute for production smoke tests.
 
 ## Safety
 

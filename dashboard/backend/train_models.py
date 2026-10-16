@@ -76,15 +76,46 @@ def evaluate_and_fit(
     if n_splits < 2:
         raise ValueError(f"{name}: each target class needs at least two rows for stratified CV")
     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    scoring = {
+        "accuracy": "accuracy",
+        "balanced_accuracy": "balanced_accuracy",
+        "macro_f1": "f1_macro",
+    }
+    if name == "diabetes":
+        # Class 1 is the positive (diabetes) label in this dataset.
+        from sklearn.metrics import make_scorer
+        scoring["sensitivity"] = make_scorer(recall_score, pos_label=1, zero_division=0)
+        scoring["specificity"] = make_scorer(recall_score, pos_label=0, zero_division=0)
+        scoring["roc_auc"] = "roc_auc"
+
     cv_scores = cross_validate(
         clone(pipeline),
         X,
         y,
         cv=cv,
-        scoring={"accuracy": "accuracy", "balanced_accuracy": "balanced_accuracy", "macro_f1": "f1_macro"},
+        scoring=scoring,
         n_jobs=-1,
         error_score="raise",
     )
+
+    binary_diagnostics = None
+    if name == "diabetes":
+        # Explicitly calculate clinically relevant screening metrics. These are
+        # dataset metrics only, not evidence of clinical safety.
+        matrix = confusion_matrix(y_test, y_pred, labels=[0, 1])
+        tn, fp, fn, tp = (int(v) for v in matrix.ravel())
+        decision_scores = evaluation_pipeline.decision_function(X_test)
+        binary_diagnostics = {
+            "positive_label": 1,
+            "negative_label": 0,
+            "true_negatives": tn,
+            "false_positives": fp,
+            "false_negatives": fn,
+            "true_positives": tp,
+            "sensitivity_recall_positive_class": float(recall_score(y_test, y_pred, pos_label=1, zero_division=0)),
+            "specificity_recall_negative_class": float(recall_score(y_test, y_pred, pos_label=0, zero_division=0)),
+            "roc_auc": float(roc_auc_score(y_test, decision_scores)),
+        }
 
     report = {
         "model": name,
@@ -104,6 +135,7 @@ def evaluate_and_fit(
             "confusion_matrix_labels": [str(label) for label in labels],
             "confusion_matrix": confusion_matrix(y_test, y_pred, labels=labels).tolist(),
         },
+        "diabetes_binary_diagnostics": binary_diagnostics,
         "stratified_cross_validation": {
             "folds": n_splits,
             "accuracy_mean": float(cv_scores["test_accuracy"].mean()),
@@ -112,6 +144,14 @@ def evaluate_and_fit(
             "balanced_accuracy_std": float(cv_scores["test_balanced_accuracy"].std()),
             "macro_f1_mean": float(cv_scores["test_macro_f1"].mean()),
             "macro_f1_std": float(cv_scores["test_macro_f1"].std()),
+            **({
+                "sensitivity_mean": float(cv_scores["test_sensitivity"].mean()),
+                "sensitivity_std": float(cv_scores["test_sensitivity"].std()),
+                "specificity_mean": float(cv_scores["test_specificity"].mean()),
+                "specificity_std": float(cv_scores["test_specificity"].std()),
+                "roc_auc_mean": float(cv_scores["test_roc_auc"].mean()),
+                "roc_auc_std": float(cv_scores["test_roc_auc"].std()),
+            } if name == "diabetes" else {}),
         },
     }
 

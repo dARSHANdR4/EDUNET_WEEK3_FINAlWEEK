@@ -14,6 +14,8 @@ replacements = [
     (", multi_class=\"ovr\"", ""),
     (", multi_class='auto'", ""),
     (", multi_class=\"auto\"", ""),
+    ("solver='liblinear'", "solver='lbfgs'"),
+    ('solver="liblinear"', 'solver="lbfgs"'),
 ]
 changed = 0
 for cell in notebook.cells:

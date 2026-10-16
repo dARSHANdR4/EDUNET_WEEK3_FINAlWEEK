@@ -37,5 +37,14 @@ jobs:
                   raise ValueError(f"{path} is empty")
               print(f"{path}: {len(df)} rows, {len(df.columns)} columns")
           PY
-      - name: Execute notebook
-        run: jupyter nbconvert --to notebook --execute FINALPROJ.ipynb --output executed.ipynb --ExecutePreprocessor.timeout=300
+      - name: Apply notebook compatibility patch
+        run: python scripts/patch_notebook_compat.py
+      - name: Execute patched notebook
+        run: jupyter nbconvert --to notebook --execute FINALPROJ.compat.ipynb --output executed.ipynb --ExecutePreprocessor.timeout=300
+      - name: Upload executed notebook
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edunet-executed-notebook
+          path: executed.ipynb
+          if-no-files-found: ignore

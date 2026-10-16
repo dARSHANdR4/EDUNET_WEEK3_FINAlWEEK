@@ -27,6 +27,9 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
 from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import FunctionTransformer
+from app.preprocessing import mark_diabetes_zeros_missing
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.svm import SVC
 
@@ -238,7 +241,12 @@ def main() -> None:
     ))
 
     X, y = load_diabetes(args.diabetes_data)
-    diabetes = Pipeline([("scaler", StandardScaler()), ("model", SVC(kernel="linear"))])
+    diabetes = Pipeline([
+        ("mark_missing", FunctionTransformer(mark_diabetes_zeros_missing, validate=False)),
+        ("impute", SimpleImputer(strategy="median", add_indicator=True)),
+        ("scaler", StandardScaler()),
+        ("model", SVC(kernel="linear", class_weight="balanced", probability=True, random_state=42)),
+    ])
     reports.append(evaluate_and_fit(
         "diabetes", diabetes, X, y, args.model_dir / "diabetes.joblib"
     ))

@@ -1,3 +1,15 @@
+## Live AI Prediction Studio
+
+- **Dashboard:** https://ai-prediction-studio.pages.dev/
+- **Backend health:** https://ai-prediction-studio-api.onrender.com/health
+- **Interactive API docs:** https://ai-prediction-studio-api.onrender.com/docs
+
+The live dashboard combines crop recommendation, fertilizer recommendation, and educational diabetes screening. Model evaluation is dataset-based; it does not establish real-world agricultural validity or clinical safety. See [model evaluation notes](dashboard/backend/EVALUATION.md).
+
+**Safety:** Crop and fertilizer results are suggestions, not guarantees. Diabetes screening is educational only and is not a diagnosis or a substitute for medical testing.
+
+---
+
 # EDUNET_WEEK3_FINAlWEEK
 
 # Crop and Fertilizer Recommendation System

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+dashboard/backend/models/*.joblib
+dashboard/backend/data/*.csv

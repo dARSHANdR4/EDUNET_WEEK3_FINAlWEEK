@@ -52,6 +52,12 @@ print(f"E2E fertilizer smoke test: PASS (predicted={fert_pred}; held-out actual=
 """
 notebook.cells.append(nbformat.v4.new_code_cell(smoke_test))
 
+# Keep compatibility with the source notebook's older nbformat schema (pre-4.5),
+# which does not permit cell IDs. GitHub's current nbformat creates IDs by default.
+if notebook.nbformat_minor < 5:
+    for cell in notebook.cells:
+        cell.pop("id", None)
+
 nbformat.validate(notebook)
 nbformat.write(notebook, target)
 print(f"Notebook compatibility patch: updated {changed} code cell(s); wrote {target}")

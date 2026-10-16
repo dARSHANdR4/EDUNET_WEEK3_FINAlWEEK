@@ -1,42 +1,131 @@
-"""Train exportable inference pipelines from the existing project datasets.
+"""Train inference pipelines and produce reproducible validation reports.
 
-Example (from dashboard/backend):
-  python train_models.py --crop-data ../../Crop_recommendation.csv --fertilizer-data "../../Fertilizer Prediction.csv" --diabetes-data ./data/diabetes.csv
-
-All preprocessing is saved inside each pipeline so API inference uses the exact fitted transforms.
+The hold-out split and stratified cross-validation are dataset-level estimates,
+not evidence of real-world/field/clinical accuracy. Preprocessing stays inside
+each saved pipeline so inference uses the fitted transforms.
 """
 from __future__ import annotations
+
 import argparse
+import json
 from pathlib import Path
+
 import joblib
 import pandas as pd
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+)
+from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score
 
 HERE = Path(__file__).resolve().parent
-MODEL_DIR = Path(__file__).resolve().parent / "models"
+MODEL_DIR = HERE / "models"
 
 CROP_FEATURES = ["N", "P", "K", "temperature", "humidity", "ph", "rainfall"]
 FERT_NUMERIC = ["Temperature", "Humidity", "Moisture", "Nitrogen", "Potassium", "Phosphorous"]
 FERT_CATEGORICAL = ["Soil Type", "Crop Type"]
 FERT_FEATURES = FERT_NUMERIC + FERT_CATEGORICAL
-DIABETES_FEATURES = ["Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI", "DiabetesPedigreeFunction", "Age"]
+DIABETES_FEATURES = [
+    "Pregnancies", "Glucose", "BloodPressure", "SkinThickness",
+    "Insulin", "BMI", "DiabetesPedigreeFunction", "Age",
+]
 
-def evaluate_and_fit(name: str, pipeline: Pipeline, X: pd.DataFrame, y: pd.Series, output: Path) -> None:
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+def dataset_diagnostics(name: str, X: pd.DataFrame) -> dict:
+    diagnostics = {"rows": int(len(X)), "features": int(X.shape[1]), "missing_values_by_feature": {}}
+    diagnostics["missing_values_by_feature"] = {
+        str(k): int(v) for k, v in X.isna().sum().items() if int(v) > 0
+    }
+    # In the Pima dataset, zero values for these measurements can mean missing
+    # measurements. Report them explicitly; don't silently change clinical data.
+    if name == "diabetes":
+        zero_suspect = ["Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI"]
+        diagnostics["zero_values_in_measurements"] = {
+            col: int((pd.to_numeric(X[col], errors="coerce") == 0).sum())
+            for col in zero_suspect
+        }
+    return diagnostics
+
+
+def evaluate_and_fit(
+    name: str, pipeline: Pipeline, X: pd.DataFrame, y: pd.Series, output: Path
+) -> dict:
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
     evaluation_pipeline = clone(pipeline)
     evaluation_pipeline.fit(X_train, y_train)
-    score = accuracy_score(y_test, evaluation_pipeline.predict(X_test))
-    # Refit on all available labeled rows for deployment after held-out evaluation.
+    y_pred = evaluation_pipeline.predict(X_test)
+    labels = sorted(pd.Series(y).unique().tolist())
+
+    # Stratified CV provides a less split-sensitive estimate. Scores remain
+    # internal-dataset estimates and must not be presented as field accuracy.
+    min_class_count = int(pd.Series(y).value_counts().min())
+    n_splits = min(5, min_class_count)
+    if n_splits < 2:
+        raise ValueError(f"{name}: each target class needs at least two rows for stratified CV")
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    cv_scores = cross_validate(
+        clone(pipeline),
+        X,
+        y,
+        cv=cv,
+        scoring={"accuracy": "accuracy", "balanced_accuracy": "balanced_accuracy", "macro_f1": "f1_macro"},
+        n_jobs=-1,
+        error_score="raise",
+    )
+
+    report = {
+        "model": name,
+        "evaluation_scope": "internal dataset only; not independent real-world or clinical validation",
+        "dataset": dataset_diagnostics(name, X),
+        "split": {"method": "stratified hold-out", "test_size": 0.2, "random_state": 42,
+                  "train_rows": int(len(X_train)), "test_rows": int(len(X_test))},
+        "holdout_metrics": {
+            "accuracy": float(accuracy_score(y_test, y_pred)),
+            "balanced_accuracy": float(balanced_accuracy_score(y_test, y_pred)),
+            "macro_precision": float(precision_score(y_test, y_pred, average="macro", zero_division=0)),
+            "macro_recall": float(recall_score(y_test, y_pred, average="macro", zero_division=0)),
+            "macro_f1": float(f1_score(y_test, y_pred, average="macro", zero_division=0)),
+            "classification_report": classification_report(
+                y_test, y_pred, labels=labels, output_dict=True, zero_division=0
+            ),
+            "confusion_matrix_labels": [str(label) for label in labels],
+            "confusion_matrix": confusion_matrix(y_test, y_pred, labels=labels).tolist(),
+        },
+        "stratified_cross_validation": {
+            "folds": n_splits,
+            "accuracy_mean": float(cv_scores["test_accuracy"].mean()),
+            "accuracy_std": float(cv_scores["test_accuracy"].std()),
+            "balanced_accuracy_mean": float(cv_scores["test_balanced_accuracy"].mean()),
+            "balanced_accuracy_std": float(cv_scores["test_balanced_accuracy"].std()),
+            "macro_f1_mean": float(cv_scores["test_macro_f1"].mean()),
+            "macro_f1_std": float(cv_scores["test_macro_f1"].std()),
+        },
+    }
+
+    # Refit the deployment pipeline on all labeled rows only after evaluation.
     pipeline.fit(X, y)
     joblib.dump(pipeline, output)
-    print(f"{name}: held-out accuracy={score:.4f}; rows={len(X)}; saved={output}")
+    print(
+        f"{name}: holdout accuracy={report['holdout_metrics']['accuracy']:.4f}; "
+        f"holdout macro-F1={report['holdout_metrics']['macro_f1']:.4f}; "
+        f"{n_splits}-fold CV macro-F1={report['stratified_cross_validation']['macro_f1_mean']:.4f}; "
+        f"rows={len(X)}; saved={output}"
+    )
+    return report
+
 
 def load_crop(path: Path) -> tuple[pd.DataFrame, pd.Series]:
     df = pd.read_csv(path)
@@ -47,14 +136,11 @@ def load_crop(path: Path) -> tuple[pd.DataFrame, pd.Series]:
     X = df[CROP_FEATURES].apply(pd.to_numeric, errors="raise")
     return X, df[target].astype(str)
 
+
 def load_fertilizer(path: Path) -> tuple[pd.DataFrame, pd.Series]:
     df = pd.read_csv(path)
-    # Source dataset has legacy spelling/spacing; normalize to the API contract.
     df.columns = [str(c).strip() for c in df.columns]
-    rename = {"Temparature": "Temperature", "Temperature": "Temperature", "Humidity": "Humidity", "Moisture": "Moisture", "Fertilizer Name": "Fertilizer Name"}
-    df = df.rename(columns=rename)
-    if "Temperature" not in df.columns and "Temparature" in df.columns:
-        df = df.rename(columns={"Temparature": "Temperature"})
+    df = df.rename(columns={"Temparature": "Temperature"})
     target = "Fertilizer Name"
     missing = set(FERT_FEATURES + [target]) - set(df.columns)
     if missing:
@@ -65,6 +151,7 @@ def load_fertilizer(path: Path) -> tuple[pd.DataFrame, pd.Series]:
     for c in FERT_CATEGORICAL:
         X[c] = X[c].astype(str).str.strip()
     return X, df[target].astype(str)
+
 
 def load_diabetes(path: Path) -> tuple[pd.DataFrame, pd.Series]:
     df = pd.read_csv(path)
@@ -78,6 +165,7 @@ def load_diabetes(path: Path) -> tuple[pd.DataFrame, pd.Series]:
         raise ValueError("Diabetes Outcome must contain only 0/1 labels")
     return X, y
 
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--crop-data", type=Path, required=True)
@@ -88,20 +176,42 @@ def main() -> None:
     args.model_dir.mkdir(parents=True, exist_ok=True)
 
     X, y = load_crop(args.crop_data)
-    crop = Pipeline([("model", RandomForestClassifier(n_estimators=300, random_state=42, class_weight="balanced", n_jobs=-1))])
-    evaluate_and_fit("crop", crop, X, y, args.model_dir / "crop.joblib")
+    crop = Pipeline([("model", RandomForestClassifier(
+        n_estimators=300, random_state=42, class_weight="balanced", n_jobs=-1
+    ))])
+    reports = [evaluate_and_fit("crop", crop, X, y, args.model_dir / "crop.joblib")]
 
     X, y = load_fertilizer(args.fertilizer_data)
     prep = ColumnTransformer([
         ("numeric", "passthrough", FERT_NUMERIC),
         ("categorical", OneHotEncoder(handle_unknown="ignore"), FERT_CATEGORICAL),
     ])
-    fertilizer = Pipeline([("preprocess", prep), ("model", RandomForestClassifier(n_estimators=300, random_state=42, class_weight="balanced", n_jobs=-1))])
-    evaluate_and_fit("fertilizer", fertilizer, X, y, args.model_dir / "fertilizer.joblib")
+    fertilizer = Pipeline([
+        ("preprocess", prep),
+        ("model", RandomForestClassifier(
+            n_estimators=300, random_state=42, class_weight="balanced", n_jobs=-1
+        )),
+    ])
+    reports.append(evaluate_and_fit(
+        "fertilizer", fertilizer, X, y, args.model_dir / "fertilizer.joblib"
+    ))
 
     X, y = load_diabetes(args.diabetes_data)
     diabetes = Pipeline([("scaler", StandardScaler()), ("model", SVC(kernel="linear"))])
-    evaluate_and_fit("diabetes", diabetes, X, y, args.model_dir / "diabetes.joblib")
+    reports.append(evaluate_and_fit(
+        "diabetes", diabetes, X, y, args.model_dir / "diabetes.joblib"
+    ))
+
+    report_path = args.model_dir / "evaluation_report.json"
+    report_path.write_text(json.dumps({
+        "notice": (
+            "Metrics are estimates on the supplied datasets only. They do not establish "
+            "real-world field performance or clinical validity."
+        ),
+        "models": reports,
+    }, indent=2), encoding="utf-8")
+    print(f"Evaluation report saved to {report_path}")
+
 
 if __name__ == "__main__":
     main()

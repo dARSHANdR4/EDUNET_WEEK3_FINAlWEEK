@@ -15,6 +15,7 @@ import pandas as pd
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     balanced_accuracy_score,
@@ -171,6 +172,77 @@ def evaluate_and_fit(
     return report
 
 
+def compare_diabetes_candidates(X: pd.DataFrame, y: pd.Series) -> dict:
+    """Compare candidate classifiers on identical splits; does not select/deploy one."""
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+    candidates = {
+        "linear_svc_balanced": Pipeline([
+            ("mark_missing", FunctionTransformer(mark_diabetes_zeros_missing, validate=False)),
+            ("impute", SimpleImputer(strategy="median", add_indicator=True)),
+            ("scaler", StandardScaler()),
+            ("model", SVC(kernel="linear", class_weight="balanced", probability=True, random_state=42)),
+        ]),
+        "logistic_regression_balanced": Pipeline([
+            ("mark_missing", FunctionTransformer(mark_diabetes_zeros_missing, validate=False)),
+            ("impute", SimpleImputer(strategy="median", add_indicator=True)),
+            ("scaler", StandardScaler()),
+            ("model", LogisticRegression(class_weight="balanced", max_iter=2000, random_state=42)),
+        ]),
+        "random_forest_balanced": Pipeline([
+            ("mark_missing", FunctionTransformer(mark_diabetes_zeros_missing, validate=False)),
+            ("impute", SimpleImputer(strategy="median", add_indicator=True)),
+            ("model", RandomForestClassifier(
+                n_estimators=300, class_weight="balanced", random_state=42, n_jobs=-1
+            )),
+        ]),
+    }
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    scoring = {
+        "accuracy": "accuracy",
+        "balanced_accuracy": "balanced_accuracy",
+        "sensitivity": __import__("sklearn.metrics", fromlist=["make_scorer"]).make_scorer(
+            recall_score, pos_label=1, zero_division=0
+        ),
+        "specificity": __import__("sklearn.metrics", fromlist=["make_scorer"]).make_scorer(
+            recall_score, pos_label=0, zero_division=0
+        ),
+        "roc_auc": "roc_auc",
+    }
+    results = {}
+    for name, pipeline in candidates.items():
+        fitted = clone(pipeline).fit(X_train, y_train)
+        pred = fitted.predict(X_test)
+        scores = fitted.predict_proba(X_test)[:, 1] if hasattr(fitted, "predict_proba") else fitted.decision_function(X_test)
+        cv_scores = cross_validate(
+            clone(pipeline), X_train, y_train, cv=cv, scoring=scoring,
+            n_jobs=-1, error_score="raise"
+        )
+        tn, fp, fn, tp = (int(v) for v in confusion_matrix(y_test, pred, labels=[0, 1]).ravel())
+        results[name] = {
+            "holdout": {
+                "accuracy": float(accuracy_score(y_test, pred)),
+                "balanced_accuracy": float(balanced_accuracy_score(y_test, pred)),
+                "sensitivity": float(recall_score(y_test, pred, pos_label=1, zero_division=0)),
+                "specificity": float(recall_score(y_test, pred, pos_label=0, zero_division=0)),
+                "roc_auc": float(roc_auc_score(y_test, scores)),
+                "true_negatives": tn, "false_positives": fp,
+                "false_negatives": fn, "true_positives": tp,
+            },
+            "training_split_cross_validation": {
+                metric: {"mean": float(cv_scores[f"test_{metric}"].mean()),
+                         "std": float(cv_scores[f"test_{metric}"].std())}
+                for metric in scoring
+            },
+        }
+    return {
+        "scope": "exploratory comparison on the same internal dataset; not external clinical validation",
+        "selection_policy": "No candidate is automatically promoted to production; review sensitivity, specificity, ROC-AUC, and false negatives together.",
+        "candidates": results,
+    }
+
+
 def load_crop(path: Path) -> tuple[pd.DataFrame, pd.Series]:
     df = pd.read_csv(path)
     target = "label" if "label" in df.columns else "crop"
@@ -247,9 +319,11 @@ def main() -> None:
         ("scaler", StandardScaler()),
         ("model", SVC(kernel="linear", class_weight="balanced", probability=True, random_state=42)),
     ])
-    reports.append(evaluate_and_fit(
+    diabetes_report = evaluate_and_fit(
         "diabetes", diabetes, X, y, args.model_dir / "diabetes.joblib"
-    ))
+    )
+    diabetes_report["candidate_model_comparison"] = compare_diabetes_candidates(X, y)
+    reports.append(diabetes_report)
 
     report_path = args.model_dir / "evaluation_report.json"
     report_path.write_text(json.dumps({

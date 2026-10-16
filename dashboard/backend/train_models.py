@@ -125,7 +125,18 @@ def evaluate_and_fit(
     report = {
         "model": name,
         "evaluation_scope": "internal dataset only; not independent real-world or clinical validation",
-        "dataset": dataset_diagnostics(name, X),
+        "dataset": {
+            **dataset_diagnostics(name, X),
+            "target_class_counts": {str(k): int(v) for k, v in y.value_counts().sort_index().items()},
+            "exact_duplicate_feature_rows": int(X.duplicated().sum()),
+            "exact_duplicate_feature_target_rows": int(pd.concat([X.reset_index(drop=True), y.reset_index(drop=True).rename("__target__")], axis=1).duplicated().sum()),
+        },
+        "dataset_quality_warnings": (
+            (["Very small labeled dataset; holdout estimates are highly uncertain and external validation is required."]
+             if name == "fertilizer" and len(X) < 500 else [])
+            + (["Exact duplicate feature-target rows exist; random holdout/CV can overestimate generalization if duplicates cross folds."]
+               if pd.concat([X.reset_index(drop=True), y.reset_index(drop=True).rename("__target__")], axis=1).duplicated().sum() > 0 else [])
+        ),
         "split": {"method": "stratified hold-out", "test_size": 0.2, "random_state": 42,
                   "train_rows": int(len(X_train)), "test_rows": int(len(X_test))},
         "holdout_metrics": {

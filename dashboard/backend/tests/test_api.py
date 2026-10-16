@@ -23,3 +23,35 @@ def test_diabetes_rejects_invalid_age():
 def test_fertilizer_rejects_missing_fields():
     response = client.post("/api/fertilizer/predict", json={"Temperature":26})
     assert response.status_code == 422
+
+
+def test_crop_prediction_when_artifact_is_installed():
+    from pathlib import Path
+    model_path = Path(__file__).resolve().parents[1] / "models" / "crop.joblib"
+    if not model_path.exists():
+        import pytest
+        pytest.skip("Training artifacts are created in the model-integration CI job")
+    response = client.post("/api/crop/predict", json={"N":90,"P":42,"K":43,"temperature":22,"humidity":80,"ph":6.5,"rainfall":203})
+    assert response.status_code == 200, response.text
+    assert isinstance(response.json()["prediction"], str) and response.json()["prediction"]
+
+def test_fertilizer_prediction_when_artifact_is_installed():
+    from pathlib import Path
+    model_path = Path(__file__).resolve().parents[1] / "models" / "fertilizer.joblib"
+    if not model_path.exists():
+        import pytest
+        pytest.skip("Training artifacts are created in the model-integration CI job")
+    response = client.post("/api/fertilizer/predict", json={"Temperature":26,"Humidity":52,"Moisture":38,"Soil Type":"Sandy","Crop Type":"Maize","Nitrogen":37,"Potassium":0,"Phosphorous":0})
+    assert response.status_code == 200, response.text
+    assert isinstance(response.json()["prediction"], str) and response.json()["prediction"]
+
+def test_diabetes_prediction_when_artifact_is_installed():
+    from pathlib import Path
+    model_path = Path(__file__).resolve().parents[1] / "models" / "diabetes.joblib"
+    if not model_path.exists():
+        import pytest
+        pytest.skip("Training artifacts are created in the model-integration CI job")
+    response = client.post("/api/diabetes/predict", json={"Pregnancies":5,"Glucose":166,"BloodPressure":72,"SkinThickness":19,"Insulin":175,"BMI":25.8,"DiabetesPedigreeFunction":0.587,"Age":51})
+    assert response.status_code == 200, response.text
+    assert response.json()["class"] in (0, 1)
+    assert "not a medical diagnosis" in response.json()["disclaimer"]

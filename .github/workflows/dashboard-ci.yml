@@ -45,3 +45,5 @@ jobs:
             --diabetes-data dashboard/backend/data/diabetes.csv
       - run: pytest -q dashboard/backend/tests
       - run: python -c "import sys; sys.path.insert(0, 'dashboard/backend'); from app.main import app; print(app.title)"
+      - name: Build production API container
+        run: docker build --file dashboard/backend/Dockerfile --tag ai-prediction-studio-api .

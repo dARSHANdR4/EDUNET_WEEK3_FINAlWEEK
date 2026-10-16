@@ -26,7 +26,6 @@ class FertilizerInput(BaseModel):
     Temperature: float = Field(ge=-10, le=60)
     Humidity: float = Field(ge=0, le=100)
     Moisture: float = Field(ge=0, le=100)
-    **kwargs: Any
 
 class DiabetesInput(BaseModel):
     Pregnancies: float = Field(ge=0, le=20)

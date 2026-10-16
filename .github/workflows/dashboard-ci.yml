@@ -31,4 +31,5 @@ jobs:
           python-version: '3.12'
       - run: python -m py_compile dashboard/backend/app/main.py
       - run: python -m pip install -r dashboard/backend/requirements.txt
+      - run: pytest -q dashboard/backend/tests
       - run: python -c "import sys; sys.path.insert(0, 'dashboard/backend'); from app.main import app; print(app.title)"

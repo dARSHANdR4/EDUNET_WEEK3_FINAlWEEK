@@ -55,3 +55,36 @@ def test_diabetes_prediction_when_artifact_is_installed():
     assert response.status_code == 200, response.text
     assert response.json()["class"] in (0, 1)
     assert "not a medical diagnosis" in response.json()["disclaimer"]
+
+
+
+def test_diabetes_zero_sentinels_are_marked_missing():
+    import pandas as pd
+    from app.preprocessing import mark_diabetes_zeros_missing
+
+    frame = pd.DataFrame([{
+        "Pregnancies": 0, "Glucose": 0, "BloodPressure": 0,
+        "SkinThickness": 0, "Insulin": 0, "BMI": 0,
+        "DiabetesPedigreeFunction": 0.2, "Age": 30,
+    }])
+    transformed = mark_diabetes_zeros_missing(frame)
+    for column in ("Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI"):
+        assert pd.isna(transformed.loc[0, column])
+    assert transformed.loc[0, "Pregnancies"] == 0
+    assert transformed.loc[0, "DiabetesPedigreeFunction"] == 0.2
+    assert transformed.loc[0, "Age"] == 30
+    # The helper must not mutate the caller's original input.
+    assert frame.loc[0, "Glucose"] == 0
+
+
+def test_diabetes_preprocessing_preserves_nonzero_measurements():
+    import pandas as pd
+    from app.preprocessing import mark_diabetes_zeros_missing
+
+    frame = pd.DataFrame([{
+        "Pregnancies": 1, "Glucose": 120, "BloodPressure": 70,
+        "SkinThickness": 20, "Insulin": 79, "BMI": 25.8,
+        "DiabetesPedigreeFunction": 0.5, "Age": 33,
+    }])
+    transformed = mark_diabetes_zeros_missing(frame)
+    assert transformed.equals(frame)

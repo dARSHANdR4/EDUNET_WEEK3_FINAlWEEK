@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Activity, Sprout, FlaskConical, HeartPulse, ShieldCheck, ArrowUpRight, LoaderCircle, Leaf, Gauge, Info } from 'lucide-react';
 
 const API = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
@@ -47,7 +47,7 @@ function App() {
     try { const r = await fetch(API + '/health'); setApiStatus(r.ok ? 'online' : 'offline'); }
     catch { setApiStatus('offline'); }
   }
-  useState(() => { checkApi(); }, []);
+  useEffect(() => { checkApi(); }, []);
   async function submit(e) {
     e.preventDefault(); setLoading(true); setResults(prev => ({ ...prev, [active]: null }));
     try {

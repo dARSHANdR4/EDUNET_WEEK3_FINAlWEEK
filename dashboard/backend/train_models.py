@@ -10,6 +10,7 @@ import argparse
 from pathlib import Path
 import joblib
 import pandas as pd
+from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -29,7 +30,7 @@ DIABETES_FEATURES = ["Pregnancies", "Glucose", "BloodPressure", "SkinThickness",
 
 def evaluate_and_fit(name: str, pipeline: Pipeline, X: pd.DataFrame, y: pd.Series, output: Path) -> None:
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    evaluation_pipeline = joblib.loads(joblib.dumps(pipeline))
+    evaluation_pipeline = clone(pipeline)
     evaluation_pipeline.fit(X_train, y_train)
     score = accuracy_score(y_test, evaluation_pipeline.predict(X_test))
     # Refit on all available labeled rows for deployment after held-out evaluation.
